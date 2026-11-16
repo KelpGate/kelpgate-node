@@ -4,7 +4,7 @@
   "description": "Kelpgate Client for Node.js: scan files and URLs for malware with the Kelpgate API, with a CLI and Express middleware.",
   "license": "MIT",
   "author": "JustBots Labs",
-  "homepage": "https://github.com/KelpGate/kelpgate-node#readme",
+  "homepage": "https://kelpgate.cloud",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/KelpGate/kelpgate-node.git"
