@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fix `QuotaExceededError.usage`, which was always `undefined`: the service sends the number of scans used as `used`, and the client read `usage`. The client now reads `used`, and still reads `usage` if a response has that instead. The property name is unchanged.
+
 ## 0.4.1
 
 - Fix a slow regular expression when trimming trailing slashes from `apiUrl` and `tokenUrl`: a configured URL with a very long run of slashes could take tens of seconds to validate. The trailing slashes are now trimmed in a loop. Normal URLs behave as before.

@@ -12,7 +12,7 @@ async function main() {
   await c.scanFile('./sample.bin', { idempotencyKey: 'job-1' });
   await c.scanUrl('https://x', { idempotencyKey: 'job-1' });
   await c.scanUrlAsync('https://x', { idempotencyKey: 'job-1', webhookUrl: 'https://x' });
-  try { await c.scanUrl('https://x'); } catch (e) { if (e instanceof QuotaExceededError) void e.upgradeUrl; }
+  try { await c.scanUrl('https://x'); } catch (e) { if (e instanceof QuotaExceededError) { void e.upgradeUrl; const used: number | undefined = e.usage; void used; } }
   void sig; void done; void fromEnv(); void kelpgateScan({ client: c, onInfected: 'pass' });
 }
 void main;

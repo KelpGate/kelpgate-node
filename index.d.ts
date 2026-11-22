@@ -132,7 +132,13 @@ export class KelpgateError extends Error {
 }
 export class ConfigError extends KelpgateError { constructor(message: string); }
 export class AuthError extends KelpgateError {}
-export class QuotaExceededError extends KelpgateError { quota?: number; usage?: number; upgradeUrl?: string; }
+export class QuotaExceededError extends KelpgateError {
+  /** The plan's monthly scan quota. */
+  quota?: number;
+  /** Scans used this month (the `used` field of the 402 response). */
+  usage?: number;
+  upgradeUrl?: string;
+}
 export class PayloadTooLargeError extends KelpgateError { upgradeUrl?: string; }
 export class UnsupportedFileError extends KelpgateError {}
 export class RateLimitedError extends KelpgateError { retryAfterSeconds?: number; }
