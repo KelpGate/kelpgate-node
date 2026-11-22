@@ -132,7 +132,7 @@ All errors extend `KelpgateError` and expose `status`, `code`, `requestId` and `
 |---|---|
 | `ConfigError` | Invalid options or idempotency key; thrown before any request |
 | `AuthError` | Credentials rejected (401), or organization or client not permitted (403) |
-| `QuotaExceededError` | Monthly quota exhausted (402). Exposes `quota` and `upgradeUrl`. |
+| `QuotaExceededError` | Monthly quota exhausted (402). Exposes `quota`, `usage` and `upgradeUrl`. |
 | `PayloadTooLargeError` | File over the plan or scanner limit (413), or over `maxBytes` |
 | `UnsupportedFileError` | File type not permitted, or archive rejected by policy (415) |
 | `RateLimitedError` | Concurrency limit reached (429). Exposes `retryAfterSeconds`. |
