@@ -113,7 +113,7 @@ test('bearerToken skips the token endpoint', async () => {
 test('error mapping', async () => {
   const c = make({ maxRetries: 0 });
   const cases = [
-    [402, { error: 'q', quota: 10, usage: 10, upgrade_url: 'https://u' }, K.QuotaExceededError],
+    [402, { status: 'QUOTA_EXCEEDED', error: 'q', used: 10, quota: 10, upgrade_url: 'https://u' }, K.QuotaExceededError],
     [413, { error: 'big', upgrade_url: 'https://u' }, K.PayloadTooLargeError],
     [415, { error: 'type' }, K.UnsupportedFileError],
     [429, { error: 'busy' }, K.RateLimitedError],
@@ -125,8 +125,16 @@ test('error mapping', async () => {
     api.state.failNext.push({ status, body });
     await assert.rejects(c.scanBytes(Buffer.from('x')), (e) => e instanceof Cls && e.status === status && e.requestId === 'req-test', `status ${status}`);
   }
-  api.state.failNext.push({ status: 402, body: { quota: 5, usage: 6, upgrade_url: 'https://u' } });
-  await assert.rejects(c.scanBytes(Buffer.from('x')), (e) => e.quota === 5 && e.usage === 6 && e.upgradeUrl === 'https://u');
+});
+
+test('quota exceeded reads the used count from the 402 body', async () => {
+  const c = make({ maxRetries: 0 });
+  // The body the scanning service sends on 402.
+  api.state.failNext.push({ status: 402, body: { status: 'QUOTA_EXCEEDED', error: 'Monthly scan quota of 5 scans exceeded (6 used).', used: 6, quota: 5, upgrade_url: 'https://u' } });
+  await assert.rejects(c.scanBytes(Buffer.from('x')), (e) => e instanceof K.QuotaExceededError && e.quota === 5 && e.usage === 6 && e.upgradeUrl === 'https://u');
+  // A body with `usage` instead of `used` is still read.
+  api.state.failNext.push({ status: 402, body: { quota: 5, usage: 7, upgrade_url: 'https://u' } });
+  await assert.rejects(c.scanBytes(Buffer.from('x')), (e) => e.usage === 7);
 });
 
 test('retries 503 and honours Retry-After on 429, then succeeds', async () => {
