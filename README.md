@@ -1,46 +1,46 @@
 # Kelpgate Client for Node.js
 
-**Check every upload for malware before your app stores it.**
+[![npm](https://img.shields.io/npm/v/@kelpgate/client)](https://www.npmjs.com/package/@kelpgate/client)
+[![CI](https://github.com/KelpGate/kelpgate-node/actions/workflows/ci.yml/badge.svg)](https://github.com/KelpGate/kelpgate-node/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Node.js client for the [Kelpgate](https://kelpgate.cloud) malware-scanning API. Scan uploaded files or remote URLs, get a verdict, and keep infected files out of your app. It includes Express middleware and a command line tool.
+Official Node.js client for the [Kelpgate](https://kelpgate.cloud) malware-scanning API. It scans files, buffers, streams and URLs, manages OAuth 2.0 access tokens, retries transient failures idempotently and maps API responses to typed results and errors. The package includes Express middleware and a command-line interface, has no runtime dependencies, supports CommonJS and ES modules, and ships TypeScript definitions.
 
-> This package is open source under the MIT license. It is a client for the Kelpgate scanning service, a hosted commercial product that is not part of this package. You need a Kelpgate account to use it.
+The package is open source under the MIT licence. The Kelpgate scanning service is a commercial hosted product; using it requires a Kelpgate account.
 
 ## Contents
 
-[Why Kelpgate](#why-kelpgate) · [How it works](#how-it-works) · [Install](#install) · [Quick start](#quick-start) · [Scanning](#scanning) · [Errors](#errors) · [Options](#options) · [Express](#express) · [Command line](#command-line) · [Failure policy](#failure-policy) · [Security and privacy](#security-and-privacy) · [Compatibility](#compatibility) · [Verify your setup](#verify-your-setup) · [Troubleshooting](#troubleshooting) · [Support and versioning](#support-and-versioning) · [Contributing and security](#contributing-and-security) · [License](#license)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Scan results](#scan-results)
+- [Errors](#errors)
+- [Retries and idempotency](#retries-and-idempotency)
+- [Express middleware](#express-middleware)
+- [Command-line interface](#command-line-interface)
+- [Failure policy](#failure-policy)
+- [Security](#security)
+- [Troubleshooting](#troubleshooting)
+- [Compatibility and versioning](#compatibility-and-versioning)
+- [Support](#support)
+- [Licence](#licence)
 
-## Why Kelpgate
+## Requirements
 
-| | |
-| --- | --- |
-| **One call per file** | Send a file, a buffer, a stream or a URL and get a verdict back. An infected file is a normal result, not an exception. |
-| **Credentials handled for you** | The OAuth 2.0 access token is fetched, cached in memory and renewed before it expires. |
-| **Predictable failure behavior** | Typed errors for quota, size, file type, rate limits and network problems. You choose what happens when the scanner cannot answer: block or allow. |
-| **Safe by default** | API and token URLs must use HTTPS, redirects are never followed, and secrets never appear in errors. |
-| **Ready for your stack** | Express and Multer middleware, a command line tool, CommonJS and ESM, and TypeScript types. |
-| **Light** | No runtime dependencies. |
+- Node.js 18 or later.
+- A Kelpgate API client (client ID and secret) created in the [Kelpgate Console](https://console.kelpgate.cloud).
 
-## How it works
-
-1. The client obtains an OAuth 2.0 access token with your client credentials. Tokens are cached and renewed shortly before they expire.
-2. The file is sent to the scanning API over HTTPS.
-3. The API answers with a verdict. A clean file and an infected file (HTTP 406) both come back as a result with `infected` set to `false` or `true`. Anything that stops a verdict, such as an exhausted quota or an unreachable service, is thrown as a typed error. Your code, or the middleware, decides what to do next.
-
-## Install
+## Installation
 
 ```bash
 npm install @kelpgate/client
 ```
 
-The package is `@kelpgate/client` on npm and needs Node 18 or newer. You also need a Kelpgate account.
-
-## Quick start
-
-Create an API client in the [Kelpgate Console](https://console.kelpgate.cloud), then:
+## Configuration
 
 ```js
-const { KelpgateClient, assertClean } = require('@kelpgate/client');
+const { KelpgateClient } = require('@kelpgate/client');
 
 const kelpgate = new KelpgateClient({
   apiUrl: 'https://api.kelpgate.cloud',
@@ -48,159 +48,208 @@ const kelpgate = new KelpgateClient({
   clientId: process.env.KELPGATE_CLIENT_ID,
   clientSecret: process.env.KELPGATE_CLIENT_SECRET,
 });
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `apiUrl` | required | Base URL of the Kelpgate API |
+| `tokenUrl` | required with client credentials | OAuth 2.0 token endpoint |
+| `clientId`, `clientSecret` | | Client credentials |
+| `bearerToken` | | Static access token, used instead of client credentials |
+| `scope` | `scan` | OAuth 2.0 scope requested |
+| `timeoutMs` | `60000` | Per-request timeout |
+| `maxRetries` | `2` | Retries for network errors and HTTP 429, 502, 503 and 504 |
+| `retryDelayMs` | `500` | Base delay for exponential backoff |
+| `maxBytes` | 128 MiB | Largest file the client sends; larger files fail before upload |
+| `fetch` | global `fetch` | Alternative `fetch` implementation, for proxies or tests |
+
+`apiUrl` and `tokenUrl` must use HTTPS; plain HTTP is accepted only for `localhost`.
+
+`fromEnv()` creates a client from environment variables:
+
+| Variable | Default |
+|---|---|
+| `KELPGATE_CLIENT_ID`, `KELPGATE_CLIENT_SECRET` | |
+| `KELPGATE_TOKEN` | Static token, instead of client credentials |
+| `KELPGATE_API_URL` | `https://api.kelpgate.cloud` |
+| `KELPGATE_TOKEN_URL` | `https://auth.kelpgate.cloud/oauth2/token` |
+
+```js
+const { fromEnv } = require('@kelpgate/client');
+const kelpgate = fromEnv();
+```
+
+## Usage
+
+```js
+const { assertClean } = require('@kelpgate/client');
 
 const result = await kelpgate.scanFile('./upload.pdf');
 if (result.infected) {
-  console.log('Rejected:', result.signature);
+  // reject the upload
 }
 
-// or throw instead:
+// Alternatively, throw InfectedError for an infected file:
 assertClean(await kelpgate.scanBytes(buffer, { filename: 'report.docx' }));
 ```
 
-`fromEnv()` builds the same client from `KELPGATE_CLIENT_ID`, `KELPGATE_CLIENT_SECRET` (or `KELPGATE_TOKEN`) and the optional `KELPGATE_API_URL` / `KELPGATE_TOKEN_URL`.
+| Method | Description |
+|---|---|
+| `scanFile(source, options?)` | Scan a path, `Buffer`, `Uint8Array`, `Blob` or readable stream |
+| `scanBytes(bytes, options?)` | Scan in-memory content. `scanBuffer` is an alias. |
+| `scanUrl(url, options?)` | Have the service fetch and scan a URL |
+| `scanFileAsync(source, options?)`, `scanUrlAsync(url, options?)` | Submit a background scan; returns `{ scanId }`. Accepts `webhookUrl`. |
+| `getAsyncResult(scanId, options?)` | Returns `{ pending: true }` until the result is available |
+| `waitForResult(scanId, { intervalMs, timeoutMs })` | Poll until the result is available |
+| `health()` | Service readiness; requires no credentials |
 
-## Scanning
+Upload methods accept `filename` and `idempotencyKey`. Streams are buffered in memory before upload; pass a path for large files.
 
-| Method | What it does |
-| --- | --- |
-| `scanFile(source, opts)` | Scan a path, `Buffer`, `Uint8Array`, `Blob` or stream |
-| `scanBytes(bytes, opts)` | Same, for bytes in memory (`scanBuffer` still works as an alias) |
-| `scanUrl(url)` | Kelpgate fetches the URL and scans it |
-| `scanFileAsync` / `scanUrlAsync` | Start a scan and get a `scanId`; pass `webhookUrl` to be called back |
-| `getAsyncResult(scanId)` | `{ pending: true }` until the verdict is ready |
-| `waitForResult(scanId, { intervalMs, timeoutMs })` | Poll until done |
-| `health()` | Service status; needs no credentials |
+## Scan results
 
-A scan result has `infected`, `status`, `signature`, `sha256`, `scanId`, `ruleAuthors`, `requestId`, plus two flags worth checking:
+An infected file is a result, not an exception.
 
-- `policyRejected`: the file was refused by policy (for example a disallowed type), not detected as malware.
-- `degraded`: an engine did not finish, so coverage was reduced for this scan.
+| Field | Type | Description |
+|---|---|---|
+| `infected` | `boolean` | `true` for malware or a policy rejection |
+| `status` | `string` | `CLEAN` or `INFECTED` |
+| `signature` | `string` | Detection names, joined with ` \| ` |
+| `policyRejected` | `boolean` | Rejected by policy (for example an encrypted archive) rather than detected |
+| `degraded` | `boolean` | An engine did not complete; coverage was reduced |
+| `sha256` | `string` | SHA-256 of the scanned content |
+| `ruleAuthors` | `string[]` | Authors of matching detection rules. Preserve them when displaying or forwarding a detection, as required by the Detection Rule License. |
+| `scanId`, `requestId` | `string` | Identifiers; quote `requestId` in support requests |
+| `filename`, `timestamp`, `s3Path`, `downloadUrl` | `string` | As returned by the service |
+| `raw` | `object` | Response body as received |
 
-An infected file is a normal result (`infected: true`), not an exception. Use `assertClean(result)` if you prefer one.
-
-### Retries and your quota
-
-Every scan call sends an `Idempotency-Key`. The client makes a random one for each call and reuses it on its own retries, so a retry after a timeout or a 502, 503 or 504 is not counted against your quota twice. You do not have to do anything.
-
-Pass `idempotencyKey` to protect retries you make yourself, for example one key per upload job:
-
-```js
-await kelpgate.scanFile(path, { idempotencyKey: `job-${job.id}` });
-```
-
-A key is 1 to 128 characters from `A-Za-z0-9._:-` (anything else throws `ConfigError`). The service ties a key to the file: the same key on a different file is counted as a new scan, so never reuse one key for different uploads.
+Integrations that require full coverage should treat `degraded: true` as not verified.
 
 ## Errors
 
-All errors extend `KelpgateError` and carry `status`, `code`, `requestId` (quote it to support) and the response `body`.
+All errors extend `KelpgateError` and expose `status`, `code`, `requestId` and `body`.
 
-| Error | When |
-| --- | --- |
-| `AuthError` | Bad credentials (401) or a suspended organization (403) |
-| `QuotaExceededError` | Plan quota used up (402); has `quota`, `usage`, `upgradeUrl` |
-| `PayloadTooLargeError` | File over the plan limit (413) or the client's `maxBytes` |
-| `UnsupportedFileError` | File type not allowed, or encrypted archive (415) |
-| `RateLimitedError` | Too many scans at once (429); has `retryAfterSeconds` |
-| `ScanError` | Invalid request (400) or file could not be parsed (412) |
-| `ServerError` | 5xx |
-| `NetworkError`, `TimeoutError` | Could not reach the service |
-| `ConfigError` | Wrong options, thrown by the constructor |
-| `InfectedError` | Thrown by `assertClean` |
+| Error | Condition |
+|---|---|
+| `ConfigError` | Invalid options or idempotency key; thrown before any request |
+| `AuthError` | Credentials rejected (401), or organization or client not permitted (403) |
+| `QuotaExceededError` | Monthly quota exhausted (402). Exposes `quota` and `upgradeUrl`. |
+| `PayloadTooLargeError` | File over the plan or scanner limit (413), or over `maxBytes` |
+| `UnsupportedFileError` | File type not permitted, or archive rejected by policy (415) |
+| `RateLimitedError` | Concurrency limit reached (429). Exposes `retryAfterSeconds`. |
+| `ScanError` | Invalid request (400), or content that could not be parsed (412) |
+| `ServerError` | HTTP 5xx after retries |
+| `NetworkError`, `TimeoutError` | The service could not be reached or did not respond in time |
+| `InfectedError` | Thrown by `assertClean`; exposes `result` and `signature` |
+| `KelpgateError` | Any other status, including 404 and 422 |
 
-## Options
+## Retries and idempotency
 
-`apiUrl`, `tokenUrl`, `clientId`, `clientSecret` (or `bearerToken`), `scope` (default `scan`), `timeoutMs` (60000), `maxRetries` (2), `retryDelayMs` (500), `maxBytes` (128 MiB), `fetch`.
+Every scan request carries an `Idempotency-Key`. The client generates one per call and reuses it for its own retries, so a retried scan is not counted twice against the quota. A rejected access token is discarded and the request retried once with a new token.
 
-Both URLs must be `https`; plain `http` is accepted only for `localhost`. Redirects are never followed, so credentials cannot be sent to another host.
+Supply a key to make retries across process restarts or job re-runs idempotent:
 
-## Express
+```js
+await kelpgate.scanFile(path, { idempotencyKey: `upload-${job.id}` });
+```
+
+Keys are 1 to 128 characters from `A-Z a-z 0-9 . _ : -`. The service binds a key to the request content; reusing a key for a different file is counted as a new scan.
+
+## Express middleware
 
 ```js
 const multer = require('multer');
 const { kelpgateScan } = require('@kelpgate/client/express');
 
 const upload = multer({ dest: 'uploads/' });
-app.post('/upload', upload.single('doc'), kelpgateScan({ client: kelpgate }), (req, res) => {
-  res.json({ ok: true, scan: req.kelpgate[0] });
+
+app.post('/upload', upload.single('document'), kelpgateScan({ client: kelpgate }), (req, res) => {
+  res.json({ scan: req.kelpgate[0] });
 });
 ```
 
-Infected uploads get a `422` and are deleted from disk. If scanning fails, the request is blocked with `503` (`onError: 'allow'` lets it through instead). `onInfected: 'pass'` leaves the decision to your handler.
+| Option | Default | Behaviour |
+|---|---|---|
+| `client` | required | A `KelpgateClient` |
+| `onInfected` | `reject` | `reject` responds `422` and deletes the uploaded files; `pass` continues with results in `req.kelpgate` |
+| `onError` | `block` | `block` responds `402`, `413`, `415` or `503` according to the error and deletes the uploaded files; `allow` continues with the error in `req.kelpgateError` |
+| `deleteInfected` | `true` | Delete infected files from disk, including when `onInfected` is `pass` |
 
-## Command line
+## Command-line interface
 
 ```bash
 export KELPGATE_CLIENT_ID=... KELPGATE_CLIENT_SECRET=...
-npx kelpgate scan ./file.zip other.pdf
+npx kelpgate scan ./archive.zip ./report.pdf
 npx kelpgate scan-url https://example.com/file.exe
 npx kelpgate health
 ```
 
-Exit code `0` clean, `1` infected, `2` error. Add `--json` for machine-readable output.
+| Exit code | Meaning |
+|---|---|
+| `0` | All files clean |
+| `1` | At least one file infected |
+| `2` | Error |
+
+`--json` prints machine-readable output.
 
 ## Failure policy
 
-When the scanner cannot give a verdict, the client throws a typed error. The Express middleware turns that into a decision you control with `onError`.
+When the service cannot return a verdict, the client throws. The middleware converts the error into a response according to `onError`:
 
-| Situation | Client | Middleware, `onError: 'block'` (default) | Middleware, `onError: 'allow'` |
-| --- | --- | --- | --- |
-| Scanner unreachable, timed out or returned 5xx after retries | Throws `NetworkError`, `TimeoutError` or `ServerError` | Request rejected with `503` | Request continues; the error is in `req.kelpgateError` |
-| Authentication fails | Throws `AuthError` | `503` | Continues |
-| Plan quota used up | Throws `QuotaExceededError` | `402` | Continues |
-| File over the plan limit or `maxBytes` | Throws `PayloadTooLargeError` | `413` | Continues |
-| File type not allowed | Throws `UnsupportedFileError` | `415` | Continues |
+| Condition | Client | `onError: 'block'` | `onError: 'allow'` |
+|---|---|---|---|
+| Service unreachable, timed out, or 5xx after retries | `NetworkError`, `TimeoutError`, `ServerError` | `503` | Continue |
+| Authentication failed | `AuthError` | `503` | Continue |
+| Quota exhausted | `QuotaExceededError` | `402` | Continue |
+| File too large | `PayloadTooLargeError` | `413` | Continue |
+| File type not permitted | `UnsupportedFileError` | `415` | Continue |
 
-Choose `block` where stopping malware matters more than availability, and `allow` where uploads must keep working during an outage. A retry sends the whole file again. Streams are buffered in memory before they are sent, so for very large files prefer a path.
+Use `block` where preventing malware takes priority over availability, and `allow` where uploads must continue during a service outage.
 
-## Security and privacy
+## Security
 
-- **What leaves your server:** the uploaded file and its file name, sent over HTTPS to the API URL you configure. Nothing else about your application is sent.
-- **Transport:** API and token endpoints must use HTTPS (plain HTTP is accepted only for `localhost`). Redirects are never followed.
-- **Secrets:** the client secret never appears in error messages or when a client is serialised. Keep it in an environment variable or a secrets manager, not in source control.
-- **Token handling:** access tokens are kept in memory only, never written to disk, and refreshed ahead of expiry. A rejected token is discarded and retried once.
-- **Nothing stored locally:** the package writes nothing to disk. The Express middleware deletes infected files that Multer saved.
-- **Data kept by the service:** files that scan clean are kept briefly and infected files are quarantined, according to your Kelpgate plan. That is the service's behavior, not this package's.
+| Aspect | Behaviour |
+|---|---|
+| Data sent | The file content and its name, over HTTPS, to the configured `apiUrl` only |
+| Transport | HTTPS required except for `localhost`; redirects are never followed |
+| Credentials | Never included in error messages or serialised output (`toJSON` omits them) |
+| Tokens | Held in memory only and renewed before expiry |
+| Local storage | The package writes nothing to disk; the middleware deletes rejected uploads |
+| Service retention | Clean files are retained briefly and infected files quarantined, according to the Kelpgate plan |
 
-## Compatibility
-
-Node 18, 20, 22 and 24, tested in CI on every change. The package has no runtime dependencies, works with both `require` and `import`, and ships TypeScript types that are type-checked in CI.
-
-## Verify your setup
-
-Download the standard EICAR test file from [eicar.org](https://www.eicar.org/download-anti-malware-testfile/). It is a harmless file that every scanner treats as a virus.
-
-```bash
-npx kelpgate scan ./eicar.com
-```
-
-The scan should report `INFECTED` and exit with code `1`. Then scan any ordinary file and confirm it reports `clean` and exits with `0`.
+Report vulnerabilities according to the [security policy](https://github.com/KelpGate/.github/blob/main/SECURITY.md).
 
 ## Troubleshooting
 
-| Symptom | Likely cause |
-| --- | --- |
-| `ConfigError`: must use https | `apiUrl` or `tokenUrl` is not HTTPS. Plain HTTP works only for `localhost`. |
-| `AuthError` with code `TOKEN_REQUEST_FAILED` | The client ID or secret is wrong, or the API client does not have the `scan` scope. |
-| `AuthError` with status 403 | The organization is suspended, or the API client is not linked to an organization. |
-| `QuotaExceededError` | The plan's scan quota is used up. The error carries an `upgradeUrl`. |
-| `RateLimitedError`, or slow scans under load | Too many scans at once. The client retries and honours `Retry-After`; lower your concurrency. |
-| `PayloadTooLargeError` | The file is over the plan limit or the client's `maxBytes`. |
-| `TimeoutError` on large files | Raise `timeoutMs`, or use `scanFileAsync` and `waitForResult`. |
-| Clean results with `degraded: true` | An engine did not finish for that scan. The result is still valid; coverage was reduced. |
+Verify an installation with the [EICAR test file](https://www.eicar.org/download-anti-malware-testfile/), which every scanner reports as infected:
 
-## Support and versioning
+```bash
+npx kelpgate scan ./eicar.com    # INFECTED, exit code 1
+```
 
-This project follows [Semantic Versioning](https://semver.org): breaking changes only in major versions, new features in minor versions, fixes in patch versions. Releases are tagged on GitHub, and user-visible changes are listed in the [changelog](CHANGELOG.md).
+| Symptom | Cause |
+|---|---|
+| `ConfigError: ... must use https` | `apiUrl` or `tokenUrl` is not HTTPS |
+| `AuthError` with code `TOKEN_REQUEST_FAILED` | Invalid client ID or secret, or the client lacks the `scan` scope |
+| `AuthError` with status 403 | Organization suspended, or client not linked to an organization |
+| `RateLimitedError` | Too many concurrent scans; the client honours `Retry-After`. Reduce concurrency. |
+| `TimeoutError` on large files | Increase `timeoutMs`, or use `scanFileAsync` with `waitForResult` |
+| `degraded: true` | An engine did not complete for that scan |
 
-Fixes, including security fixes, go into the latest release only, so upgrade to receive them. The tested runtime versions are listed under Compatibility. The client talks to version 1 of the Kelpgate API (`/api/v1`).
+## Compatibility and versioning
 
-For help, see [getting help](https://github.com/KelpGate/.github/blob/main/SUPPORT.md) or email support@kelpgate.cloud.
+| Component | Supported |
+|---|---|
+| Node.js | 18, 20, 22, 24 (tested in CI) |
+| Module systems | CommonJS, ES modules |
+| TypeScript | Definitions included and type-checked in CI |
+| Kelpgate API | Version 1 (`/api/v1`) |
 
-## Contributing and security
+The package follows [Semantic Versioning](https://semver.org). Fixes, including security fixes, are released for the latest version only. Changes are listed in the [changelog](CHANGELOG.md). The organisation-wide policy is in [versioning and releases](https://github.com/KelpGate/.github/blob/main/docs/versioning-and-releases.md).
 
-Bug reports and pull requests are welcome; see the [contributing guide](https://github.com/KelpGate/.github/blob/main/CONTRIBUTING.md). To report a vulnerability, follow the [security policy](https://github.com/KelpGate/.github/blob/main/SECURITY.md) and report it privately. For help, see [getting help](https://github.com/KelpGate/.github/blob/main/SUPPORT.md).
+## Support
 
-## License
+See [getting help](https://github.com/KelpGate/.github/blob/main/SUPPORT.md) or contact support@kelpgate.cloud. Contributions follow the [contributing guide](https://github.com/KelpGate/.github/blob/main/CONTRIBUTING.md).
 
-MIT. See [LICENSE](LICENSE). You can use this package in open-source and proprietary software alike. The Kelpgate scanning service it connects to is a hosted commercial product with its own terms.
+## Licence
+
+MIT. See [LICENSE](LICENSE). The Kelpgate scanning service is subject to its own terms.
