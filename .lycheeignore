@@ -1,0 +1,2 @@
+# npmjs.com answers automated requests with 403, so its pages cannot be checked from CI.
+^https://www\.npmjs\.com/
